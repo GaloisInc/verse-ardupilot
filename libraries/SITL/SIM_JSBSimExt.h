@@ -58,15 +58,11 @@ private:
 
     uint16_t control_port;
     uint16_t fdm_port;
-    char *jsbsim_script;
-    char *jsbsim_fgout;
-    int jsbsim_stdout;
 
     // default JSBSim model
     const char *jsbsim_model = "Rascal";
 
     bool created_templates;
-    bool started_jsbsim;
     bool opened_control_socket;
     bool opened_fdm_socket;
 
@@ -77,13 +73,10 @@ private:
     } frame;
 
     bool create_templates(void);
-    bool start_JSBSim(void);
     bool open_control_socket(void);
     bool open_fdm_socket(void);
     void send_servos(const struct sitl_input &input);
     void recv_fdm(const struct sitl_input &input);
-    void check_stdout(void) const;
-    bool expect(const char *str) const;
 
     void drain_control_socket();
 };

@@ -45,10 +45,7 @@ JSBSimExt::JSBSimExt(const char *frame_str) :
     sock_control(false),
     sock_fgfdm(true),
     initialised(false),
-    jsbsim_script(nullptr),
-    jsbsim_fgout(nullptr),
     created_templates(false),
-    started_jsbsim(false),
     opened_control_socket(false),
     opened_fdm_socket(false),
     frame(FRAME_NORMAL)
@@ -80,7 +77,9 @@ bool JSBSimExt::create_templates(void)
         return true;
     }
 
+    char *jsbsim_script;
     asprintf(&jsbsim_script, "%s/jsbsim_start_%u.xml", autotest_dir, instance);
+    char *jsbsim_fgout;
     asprintf(&jsbsim_fgout,  "%s/jsbsim_fgout_%u.xml", autotest_dir, instance);
 
     printf("JSBSim_script: '%s'\n", jsbsim_script);
@@ -128,7 +127,10 @@ bool JSBSimExt::create_templates(void)
             jsbsim_model,
             jsbsim_model,
             jsbsim_model,
-            control_port,
+            // We still connect to `control_port`, but configure JSBSim to
+            // listen on a different port instead.  `jsbsim_proxy` will forward
+            // traffic between the two (after starting JSBSim).
+            control_port + 10000,
             1.0/rate_hz);
     fclose(f);
 
@@ -175,123 +177,6 @@ bool JSBSimExt::create_templates(void)
     return true;
 }
 
-
-/*
-  start JSBSim child
- */
-bool JSBSimExt::start_JSBSim(void)
-{
-    if (started_jsbsim) {
-        return true;
-    }
-    if (!open_fdm_socket()) {
-        return false;
-    }
-
-    int p[2];
-    int devnull = open("/dev/null", O_RDWR|O_CLOEXEC);
-    if (pipe(p) != 0) {
-        AP_HAL::panic("Unable to create pipe");
-    }
-    pid_t child_pid = fork();
-    if (child_pid == 0) {
-        // in child
-        setsid();
-        dup2(devnull, 0);
-        dup2(p[1], 1);
-        close(p[0]);
-        for (uint8_t i=3; i<100; i++) {
-            close(i);
-        }
-        char *logdirective;
-        char *script;
-        char *nice;
-        char *rate;
-
-        asprintf(&logdirective, "--logdirectivefile=%s", jsbsim_fgout);
-        asprintf(&script, "--script=%s", jsbsim_script);
-        asprintf(&nice, "--nice=%.8f", 10*1e-9);
-        asprintf(&rate, "--simulation-rate=%f", rate_hz);
-
-        if (chdir(autotest_dir) != 0) {
-            perror(autotest_dir);
-            exit(1);
-        }
-
-        int ret = execlp("JSBSim",
-                         "JSBSim",
-                         "--suspend",
-                         rate,
-                         nice,
-                         logdirective,
-                         script,
-                         nullptr);
-        if (ret != 0) {
-            perror("JSBSim");
-        }
-        exit(1);
-    }
-    close(p[1]);
-    jsbsim_stdout = p[0];
-
-    // read startup to be sure it is running
-    char c;
-    if (read(jsbsim_stdout, &c, 1) != 1) {
-        AP_HAL::panic("Unable to start JSBSim");
-    }
-
-    if (!expect("JSBSim Execution beginning")) {
-        AP_HAL::panic("Failed to start JSBSim");
-    }
-    if (!open_control_socket()) {
-        AP_HAL::panic("Failed to open JSBSim control socket");
-    }
-
-    fcntl(jsbsim_stdout, F_SETFL, fcntl(jsbsim_stdout, F_GETFL, 0) | O_NONBLOCK);
-
-    started_jsbsim = true;
-    check_stdout();
-    close(devnull);
-    return true;
-}
-
-/*
-  check for stdout from JSBSim
- */
-void JSBSimExt::check_stdout(void) const
-{
-    char line[100];
-    ssize_t ret = ::read(jsbsim_stdout, line, sizeof(line));
-    if (ret > 0) {
-#if DEBUG_JSBSIM_EXT
-        write(1, line, ret);
-#endif
-    }
-}
-
-/*
-  a simple function to wait for a string on jsbsim_stdout
- */
-bool JSBSimExt::expect(const char *str) const
-{
-    const char *basestr = str;
-    while (*str) {
-        char c;
-        if (read(jsbsim_stdout, &c, 1) != 1) {
-            return false;
-        }
-        if (c == *str) {
-            str++;
-        } else {
-            str = basestr;
-        }
-#if DEBUG_JSBSIM_EXT
-        write(1, &c, 1);
-#endif
-    }
-    return true;
-}
-
 /*
   open control socket to JSBSim
  */
@@ -325,7 +210,6 @@ bool JSBSimExt::open_fdm_socket(void)
         return true;
     }
     if (!sock_fgfdm.bind("127.0.0.1", fdm_port)) {
-        check_stdout();
         return false;
     }
     sock_fgfdm.set_blocking(false);
@@ -398,12 +282,10 @@ void JSBSimExt::send_servos(const struct sitl_input &input)
 void JSBSimExt::recv_fdm(const struct sitl_input &input)
 {
     FGNetFDM fdm;
-    check_stdout();
 
     do {
         while (sock_fgfdm.recv(&fdm, sizeof(fdm), 100) != sizeof(fdm)) {
             send_servos(input);
-            check_stdout();
         }
         fdm.ByteSwap();
     } while (fdm.cur_time == time_now_us);
@@ -449,9 +331,8 @@ void JSBSimExt::update(const struct sitl_input &input)
 {
     while (!initialised) {
         if (!create_templates() ||
-            !start_JSBSim() ||
-            !open_control_socket() ||
-            !open_fdm_socket()) {
+            !open_fdm_socket() ||
+            !open_control_socket()) {
             time_now_us = 1;
             return;
         }
