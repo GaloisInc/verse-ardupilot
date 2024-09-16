@@ -185,7 +185,8 @@ bool JSBSimExt::open_control_socket(void)
     if (opened_control_socket) {
         return true;
     }
-    if (!sock_control.connect("127.0.0.1", control_port)) {
+    printf("JSBSim backend: connecting to %s:%u\n", control_address, control_port);
+    if (!sock_control.connect(control_address, control_port)) {
         return false;
     }
     printf("Opened JSBSim control socket\n");
@@ -209,7 +210,8 @@ bool JSBSimExt::open_fdm_socket(void)
     if (opened_fdm_socket) {
         return true;
     }
-    if (!sock_fgfdm.bind("127.0.0.1", fdm_port)) {
+    printf("JSBSim backend: listening on %s:%u\n", fdm_bind_address, fdm_port);
+    if (!sock_fgfdm.bind(fdm_bind_address, fdm_port)) {
         return false;
     }
     sock_fgfdm.set_blocking(false);
@@ -343,6 +345,20 @@ void JSBSimExt::update(const struct sitl_input &input)
     adjust_frame_time(rate_hz);
     sync_frame_time();
     drain_control_socket();
+}
+
+void JSBSimExt::set_interface_ports(const char* address, const int port_in, const int port_out) {
+    control_address = address;
+    control_port = port_out;
+    fdm_port = port_in;
+
+    if (strcmp(address, "127.0.0.1") == 0) {
+        fdm_bind_address = "127.0.0.1";
+    } else {
+        fdm_bind_address = "0.0.0.0";
+    }
+    printf("JSBSim backend: set control address to %s:%u\n", control_address, control_port);
+    printf("JSBSim backend: set fdm bind address to %s:%u\n", fdm_bind_address, fdm_port);
 }
 
 } // namespace SITL

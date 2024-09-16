@@ -47,6 +47,8 @@ public:
         return new JSBSimExt(frame_str);
     }
 
+    void set_interface_ports(const char* address, const int port_in, const int port_out) override;
+
 private:
     // tcp input control socket to JSBSIm
     SocketAPM_native sock_control;
@@ -56,7 +58,9 @@ private:
 
     bool initialised;
 
+    const char* control_address = "127.0.0.1";
     uint16_t control_port;
+    const char* fdm_bind_address = "127.0.0.1";
     uint16_t fdm_port;
 
     // default JSBSim model
