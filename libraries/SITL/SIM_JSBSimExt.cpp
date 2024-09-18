@@ -131,7 +131,7 @@ bool JSBSimExt::create_templates(void)
             // listen on a different port instead.  `jsbsim_proxy` will forward
             // traffic between the two (after starting JSBSim).
             control_port + 10000,
-            1.0/rate_hz);
+            1.0/(rate_hz * jsbsim_rate_multiplier));
     fclose(f);
 
     f = fopen(jsbsim_fgout, "w");
@@ -256,12 +256,13 @@ void JSBSimExt::send_servos(const struct sitl_input &input)
              "set atmosphere/wind-mag-fps %f\n"
              "set atmosphere/turbulence/milspec/windspeed_at_20ft_AGL-fps %f\n"
              "set atmosphere/turbulence/milspec/severity %f\n"
-             "iterate 1\n",
+             "iterate %d\n",
              aileron, elevator, rudder, throttle,
              radians(input.wind.direction),
              wind_speed_fps,
              wind_speed_fps/3,
-             input.wind.turbulence);
+             input.wind.turbulence,
+             jsbsim_rate_multiplier);
     ssize_t buflen = strlen(buf);
     ssize_t sent = sock_control.send(buf, buflen);
     free(buf);
@@ -345,6 +346,19 @@ void JSBSimExt::update(const struct sitl_input &input)
     adjust_frame_time(rate_hz);
     sync_frame_time();
     drain_control_socket();
+}
+
+void JSBSimExt::set_config(const char* config) {
+    if (*config == '\0') {
+        jsbsim_rate_multiplier = 1;
+        return;
+    }
+
+    jsbsim_rate_multiplier = atoi(config);
+    if (jsbsim_rate_multiplier <= 0) {
+        printf("bad JSBSim rate multiplier: %s\n", config);
+        exit(1);
+    }
 }
 
 void JSBSimExt::set_interface_ports(const char* address, const int port_in, const int port_out) {
