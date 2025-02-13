@@ -47,6 +47,7 @@ public:
         return new JSBSimExt(frame_str);
     }
 
+    void set_config(const char* config) override;
     void set_interface_ports(const char* address, const int port_in, const int port_out) override;
 
 private:
@@ -65,6 +66,7 @@ private:
 
     // default JSBSim model
     const char *jsbsim_model = "Rascal";
+    int jsbsim_rate_multiplier = 1;
 
     bool created_templates;
     bool opened_control_socket;
